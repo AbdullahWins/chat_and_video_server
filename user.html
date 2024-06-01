@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat App</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        background-color: #f0f0f0;
+      }
+      .container {
+        max-width: 600px;
+        margin: 50px auto;
+        padding: 20px;
+        background-color: white;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      ul {
+        list-style-type: none;
+        padding: 0;
+      }
+      li {
+        padding: 10px;
+        margin-bottom: 10px;
+        border-radius: 5px;
+      }
+      .sent {
+        background-color: #d1ffd1;
+        text-align: right;
+      }
+      .received {
+        background-color: #ffd1d1;
+        text-align: left;
+      }
+      form {
+        display: flex;
+        margin-top: 20px;
+      }
+      input,
+      select {
+        flex: 1;
+        padding: 10px;
+        font-size: 16px;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+        margin-right: 10px;
+      }
+      button {
+        padding: 10px 20px;
+        font-size: 16px;
+        border: none;
+        border-radius: 5px;
+        background-color: #007bff;
+        color: white;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2>Select Current User</h2>
+      <select id="currentUserSelect">
+        <option value="">Select User</option>
+      </select>
+
+      <h2>Chat with User</h2>
+      <select id="userSelect">
+        <option value="">Select User</option>
+      </select>
+      <ul id="individual"></ul>
+      <form id="individualForm" action="">
+        <input
+          id="individualInput"
+          autocomplete="off"
+          placeholder="Type a message"
+        />
+        <button type="submit">Send</button>
+      </form>
+
+      <h2>Chat with Group</h2>
+      <select id="groupSelect">
+        <option value="">Select Group</option>
+      </select>
+      <ul id="group"></ul>
+      <form id="groupForm" action="">
+        <input
+          id="groupInput"
+          autocomplete="off"
+          placeholder="Type a message"
+        />
+        <button type="submit">Send</button>
+      </form>
+
+      <h2>Create Group</h2>
+      <form id="createGroupForm" action="">
+        <input
+          id="groupNameInput"
+          placeholder="Group Name"
+          autocomplete="off"
+        />
+        <input
+          id="groupUsersInput"
+          placeholder="User IDs (comma-separated)"
+          autocomplete="off"
+        />
+        <button type="submit">Create Group</button>
+      </form>
+
+      <h2>Add Users to Group</h2>
+      <form id="addUsersToGroupForm" action="">
+        <input id="groupIdInput" placeholder="Group ID" autocomplete="off" />
+        <input
+          id="addGroupUsersInput"
+          placeholder="User IDs (comma-separated)"
+          autocomplete="off"
+        />
+        <button type="submit">Add Users</button>
+      </form>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.2.0/socket.io.js"></script>
+    <script>
+      const token =
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2NjRiMjAzMzk1NWY3MmQ2MWMxYzAxZDgiLCJpYXQiOjE3MTcwNDY4NTMsImV4cCI6MTcxOTYzODg1M30.ySDQfE9p9p-X1Un-RDOGCgfqaOHGVqiDuaAcIC3oWXk"; // Replace with your actual bearer token
+      let userId = ""; // Initialize userId as an empty string
+
+      async function fetchData(url) {
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        const data = await response.json();
+        return data.data;
+      }
+
+      function populateSelect(
+        selectElement,
+        items,
+        placeholder,
+        isUser = true
+      ) {
+        selectElement.innerHTML = `<option value="">${placeholder}</option>`;
+        items.forEach((item) => {
+          const option = document.createElement("option");
+          option.value = item._id;
+          option.textContent = isUser
+            ? item.fullName || item.username
+            : item.name;
+          selectElement.appendChild(option);
+        });
+      }
+
+      async function updateUsers() {
+        const users = await fetchData("http://localhost:5000/users/all");
+        populateSelect(
+          document.getElementById("currentUserSelect"),
+          users,
+          "Select User",
+          true
+        );
+        populateSelect(
+          document.getElementById("userSelect"),
+          users,
+          "Select User",
+          true
+        );
+      }
+
+      async function updateGroups() {
+        const groups = await fetchData(
+          "http://localhost:5000/chats/groups/all"
+        );
+        populateSelect(
+          document.getElementById("groupSelect"),
+          groups,
+          "Select Group",
+          false
+        );
+      }
+
+      document.addEventListener("DOMContentLoaded", async () => {
+        await updateUsers();
+        await updateGroups();
+
+        document
+          .getElementById("currentUserSelect")
+          .addEventListener("change", (e) => {
+            userId = e.target.value;
+            if (userId) {
+              if (socket.connected) {
+                socket.disconnect();
+              }
+              socket.io.opts.query = { userId };
+              socket.connect();
+            } else {
+              socket.disconnect();
+            }
+          });
+      });
+
+      const socket = io("http://localhost:5000", {
+        autoConnect: false, // Don't connect automatically
+      });
+
+      // Receive new individual message
+      socket.on("individual", (msg) => {
+        const item = document.createElement("li");
+        item.textContent = msg.message;
+        item.className = msg.sender === userId ? "sent" : "received";
+        document.getElementById("individual").appendChild(item);
+      });
+
+      // Receive new group message
+      socket.on("group", (msg) => {
+        const item = document.createElement("li");
+        item.textContent = msg.message;
+        item.className = msg.sender === userId ? "sent" : "received";
+        document.getElementById("group").appendChild(item);
+      });
+
+      // Send individual message
+      document
+        .getElementById("individualForm")
+        .addEventListener("submit", (e) => {
+          e.preventDefault();
+          const message = document.getElementById("individualInput").value;
+          const receiverId = document.getElementById("userSelect").value;
+          if (!receiverId) {
+            alert("Please select a user to chat with.");
+            return;
+          }
+          socket.emit("individual", { senderId: userId, receiverId, message });
+          document.getElementById("individualInput").value = "";
+        });
+
+      // Send group message
+      document.getElementById("groupForm").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const message = document.getElementById("groupInput").value;
+        const groupId = document.getElementById("groupSelect").value;
+        if (!groupId) {
+          alert("Please select a group to chat with.");
+          return;
+        }
+        socket.emit("group", { senderId: userId, groupId, message });
+        document.getElementById("groupInput").value = "";
+      });
+
+      // Create a new group
+      document
+        .getElementById("createGroupForm")
+        .addEventListener("submit", (e) => {
+          e.preventDefault();
+          const groupName = document.getElementById("groupNameInput").value;
+          const userIds = document
+            .getElementById("groupUsersInput")
+            .value.split(",");
+          socket.emit("createGroup", { groupName, userIds });
+          document.getElementById("groupNameInput").value = "";
+          document.getElementById("groupUsersInput").value = "";
+        });
+
+      // Add users to an existing group
+      document
+        .getElementById("addUsersToGroupForm")
+        .addEventListener("submit", (e) => {
+          e.preventDefault();
+          const groupId = document.getElementById("groupIdInput").value;
+          const userIds = document
+            .getElementById("addGroupUsersInput")
+            .value.split(",");
+          socket.emit("addUsersToGroup", { groupId, userIds });
+          document.getElementById("groupIdInput").value = "";
+          document.getElementById("addGroupUsersInput").value = "";
+        });
+
+      // Handle group creation notification
+      socket.on("groupCreated", (group) => {
+        alert(`Group ${group.name} created successfully!`);
+        updateGroups();
+      });
+
+      // Handle users added to group notification
+      socket.on("usersAddedToGroup", (userIds) => {
+        alert(`Users added to group: ${userIds.join(", ")}`);
+        updateUsers();
+      });
+    </script>
+  </body>
+</html>
